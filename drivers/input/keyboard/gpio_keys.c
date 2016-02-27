@@ -331,12 +331,20 @@ static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 	unsigned int type = button->type ?: EV_KEY;
 	int state = (gpio_get_value_cansleep(button->gpio) ? 1 : 0) ^ button->active_low;
 
+	//Get hall switch state.
+	int state_s = (gpio_get_value_cansleep(1016) ? 1 : 0) ^ button->active_low;
+	int state_n = (gpio_get_value_cansleep(1022) ? 1 : 0) ^ button->active_low;
+	int state_hall = ((!!state_s) || (!!state_n));
+
 	if (type == EV_ABS) {
 		if (state)
 			input_event(input, type, button->code, button->value);
 	} else {
-		input_event(input, type, button->code, !!state);
+		input_event(input, type, button->code, !!state_hall);
 	}
+	//report "volume +"
+	if(!strcmp(button->desc, "volume_up"))
+		input_event(input, type, button->code, !!state);
 	input_sync(input);
 }
 
@@ -524,11 +532,19 @@ static void gpio_keys_report_state(struct gpio_keys_drvdata *ddata)
 {
 	struct input_dev *input = ddata->input;
 	int i;
+	int hall_enable;
 
 	for (i = 0; i < ddata->pdata->nbuttons; i++) {
 		struct gpio_button_data *bdata = &ddata->data[i];
-		if (gpio_is_valid(bdata->button->gpio))
-			gpio_keys_gpio_report_event(bdata);
+		if (gpio_is_valid(bdata->button->gpio)){
+			if(EV_KEY == bdata->button->type)
+				gpio_keys_gpio_report_event(bdata);
+			else if(EV_SW == bdata->button->type){
+				hall_enable = (gpio_get_value_cansleep(bdata->button->gpio) ? 1 : 0) ^ bdata->button->active_low;
+				if(0 == hall_enable)
+					gpio_keys_gpio_report_event(bdata);			
+			}
+		}
 	}
 	input_sync(input);
 }
