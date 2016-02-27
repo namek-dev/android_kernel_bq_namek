@@ -103,6 +103,8 @@ dtb-$(CONFIG_ARCH_MSM8916) += msm8916-cdp.dtb \
 	msm8936-mtp-wcd9306.dtb \
 	msmtellurium-sim.dtb \
 	msmtellurium-rumi.dtb \
+	namek-msm8939-qrd-skuk.dtb \
+	namek-r3-msm8939-qrd-skuk.dtb \
 	msm8929-cdp.dtb \
 	msm8929-mtp.dtb \
 	msm8929-mtp-smb1360.dtb \
