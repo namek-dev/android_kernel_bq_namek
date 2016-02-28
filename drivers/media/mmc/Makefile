@@ -1,1 +1,2 @@
-obj-y += siano/
+##delete, by ck-changjun.li
+#obj-y += siano/
