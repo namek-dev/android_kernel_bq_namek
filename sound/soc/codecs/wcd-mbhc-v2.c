@@ -38,6 +38,8 @@
 #include "msm8x16-wcd.h"
 #include "wcdcal-hwdep.h"
 
+#include <linux/switch.h> //add for FFBM
+
 #define WCD_MBHC_JACK_MASK (SND_JACK_HEADSET | SND_JACK_OC_HPHL | \
 			   SND_JACK_OC_HPHR | SND_JACK_LINEOUT | \
 			   SND_JACK_UNSUPPORTED)
@@ -54,6 +56,26 @@
 #define FW_READ_ATTEMPTS 15
 #define FW_READ_TIMEOUT 4000000
 #define FAKE_REM_RETRY_ATTEMPTS 3
+
+//add for long press
+#define LONG_PRESS_BTN_DOWN 0x0001
+#define LONG_PRESS_BTN_UP   0x0002
+
+unsigned int long_press_flag = 0;
+
+
+
+//add for FFBM
+struct _headset {
+	struct switch_dev sdev;
+};
+
+static struct _headset headset = {
+	.sdev = {
+	.name = "h2w",
+	.state = 0,
+	},
+};
 
 static int det_extn_cable_en;
 module_param(det_extn_cable_en, int,
@@ -89,7 +111,27 @@ enum wcd_mbhc_cs_mb_en_flag {
 static void wcd_mbhc_jack_report(struct wcd_mbhc *mbhc,
 				struct snd_soc_jack *jack, int status, int mask)
 {
-	snd_soc_jack_report_no_dapm(jack, status, mask);
+	if(long_press_flag & LONG_PRESS_BTN_DOWN)
+	{
+		input_report_key(jack->jack->input_dev,KEY_PREVIOUSSONG,1);
+		input_sync((&mbhc->button_jack)->jack->input_dev);
+		pr_debug("%s: Reporting long button_1 press event down\n",
+			__func__);
+	}
+	else if(long_press_flag & LONG_PRESS_BTN_UP)
+	{
+		input_report_key(jack->jack->input_dev,KEY_PREVIOUSSONG,0);
+		input_sync((&mbhc->button_jack)->jack->input_dev);
+		pr_debug("%s: Reporting long button_1 press event up\n",
+			__func__);
+	}
+	else
+		snd_soc_jack_report_no_dapm(jack, status, mask);
+	//add for FFBM
+	if(jack->jack->type & SND_JACK_HEADSET)
+	{
+		switch_set_state(&headset.sdev, status);
+	}
 }
 
 static void __hphocp_off_report(struct wcd_mbhc *mbhc, u32 jack_status,
@@ -175,7 +217,7 @@ static void wcd_program_btn_threshold(const struct wcd_mbhc *mbhc, bool micbias)
 
 		reg_val = (course << 5) | (fine << 2);
 		snd_soc_update_bits(codec, reg_addr, 0xFC, reg_val);
-		pr_debug("%s: course: %d fine: %d reg_addr: %x reg_val: %x\n",
+		printk(KERN_ERR "%s: course: %d fine: %d reg_addr: %x reg_val: %x\n",
 				__func__, course, fine, reg_addr, reg_val);
 		reg_addr++;
 	}
@@ -186,7 +228,7 @@ static void wcd_enable_curr_micbias(const struct wcd_mbhc *mbhc,
 {
 	struct snd_soc_codec *codec = mbhc->codec;
 
-	pr_debug("%s: enter, cs_mb_en: %d\n", __func__, cs_mb_en);
+	printk(KERN_ERR "%s: enter, cs_mb_en: %d\n", __func__, cs_mb_en);
 
 	switch (cs_mb_en) {
 	case WCD_MBHC_EN_CS:
@@ -195,7 +237,7 @@ static void wcd_enable_curr_micbias(const struct wcd_mbhc *mbhc,
 			0xC0, 0x00);
 		snd_soc_update_bits(codec,
 			MSM8X16_WCD_A_ANALOG_MBHC_FSM_CTL,
-			0x30, 0x30);
+			0x70, 0x70);
 		/* Program Button threshold registers as per CS */
 		wcd_program_btn_threshold(mbhc, false);
 		break;
@@ -871,7 +913,7 @@ static bool wcd_check_cross_conn(struct wcd_mbhc *mbhc)
 			MSM8X16_WCD_A_ANALOG_MBHC_ZDET_ELECT_RESULT);
 	pr_debug("%s: swap_res %x\n", __func__, swap_res);
 	if (!(swap_res & 0x0C)) {
-		plug_type = MBHC_PLUG_TYPE_GND_MIC_SWAP;
+//		plug_type = MBHC_PLUG_TYPE_GND_MIC_SWAP;
 		pr_debug("%s: Cross connection identified\n", __func__);
 	} else {
 		pr_debug("%s: No Cross connection found\n", __func__);
@@ -1638,8 +1680,11 @@ static void wcd_btn_lpress_fn(struct work_struct *work)
 	if (mbhc->current_plug == MBHC_PLUG_TYPE_HEADSET) {
 		pr_debug("%s: Reporting long button press event, result1: %d\n",
 			 __func__, result1);
+		if(mbhc->buttons_pressed == SND_JACK_BTN_0)
+			long_press_flag |= LONG_PRESS_BTN_DOWN;
 		wcd_mbhc_jack_report(mbhc, &mbhc->button_jack,
 				mbhc->buttons_pressed, mbhc->buttons_pressed);
+		long_press_flag &= 0;
 	}
 	pr_debug("%s: leave\n", __func__);
 	wcd9xxx_spmi_unlock_sleep();
@@ -1712,7 +1757,7 @@ irqreturn_t wcd_mbhc_btn_press_handler(int irq, void *data)
 	mbhc->buttons_pressed |= mask;
 	wcd9xxx_spmi_lock_sleep();
 	if (schedule_delayed_work(&mbhc->mbhc_btn_dwork,
-				msecs_to_jiffies(400)) == 0) {
+				msecs_to_jiffies(600)) == 0) {
 		WARN(1, "Button pressed twice without release event\n");
 		wcd9xxx_spmi_unlock_sleep();
 	}
@@ -1756,8 +1801,11 @@ static irqreturn_t wcd_mbhc_release_handler(int irq, void *data)
 		if (ret == 0) {
 			pr_debug("%s: Reporting long button release event\n",
 				 __func__);
+			if(mbhc->buttons_pressed == SND_JACK_BTN_0)
+				long_press_flag |= LONG_PRESS_BTN_UP;
 			wcd_mbhc_jack_report(mbhc, &mbhc->button_jack,
 					0, mbhc->buttons_pressed);
+			long_press_flag &= 0;
 		} else {
 			if (mbhc->in_swch_irq_handler) {
 				pr_debug("%s: Switch irq kicked in, ignore\n",
@@ -2031,6 +2079,9 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
 	const char *hph_switch = "qcom,msm-mbhc-hphl-swh";
 	const char *gnd_switch = "qcom,msm-mbhc-gnd-swh";
 
+	//add for FFBM
+	struct _headset *hs = &headset;
+
 	pr_debug("%s: enter\n", __func__);
 
 	ret = of_property_read_u32(card->dev->of_node, hph_switch, &hph_swh);
@@ -2093,7 +2144,7 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
 		}
 		ret = snd_jack_set_key(mbhc->button_jack.jack,
 				       SND_JACK_BTN_1,
-				       KEY_VOICECOMMAND);
+				       KEY_VOLUMEUP);
 		if (ret) {
 			pr_err("%s: Failed to set code for btn-1:%d\n",
 					__func__, ret);
@@ -2115,6 +2166,16 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
 				__func__, ret);
 			return ret;
 		}
+
+		//add fot register KEY_PREVIOUSSONG
+                 ret = snd_jack_set_key(mbhc->button_jack.jack,
+                                        SND_JACK_BTN_4,
+                                        KEY_PREVIOUSSONG);
+                 if (ret) {
+                         pr_err("%s: Failed to set code for btn-4\n",
+                                 __func__);
+                         return ret;
+                 }
 
 		INIT_DELAYED_WORK(&mbhc->mbhc_firmware_dwork,
 				  wcd_mbhc_fw_read);
@@ -2195,6 +2256,13 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
 	if (ret) {
 		pr_err("%s: Failed to request irq %d\n", __func__,
 		       mbhc->intr_ids->hph_right_ocp);
+		goto err_hphr_ocp_irq;
+	}
+
+	//add for FFBM
+	ret = switch_dev_register(&hs->sdev);
+	if(ret){
+		pr_err("%s: Failed to register switch\n", __func__);
 		goto err_hphr_ocp_irq;
 	}
 
