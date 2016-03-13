@@ -16,7 +16,7 @@
 #include <linux/module.h>
 #include "msm_led_flash.h"
 
-#define FLASH_NAME "camera-led-flash"
+#define FLASH_NAME "qcom,camera-led-flash"	//qcom,camera-led-flash
 
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
@@ -135,15 +135,17 @@ static int32_t msm_led_trigger_config(struct msm_led_flash_ctrl_t *fctrl,
 }
 
 static const struct of_device_id msm_led_trigger_dt_match[] = {
-	{.compatible = "qcom,camera-led-flash"},
+	{.compatible = "qcom,camera-led-flash-namek"},
 	{}
 };
 
 MODULE_DEVICE_TABLE(of, msm_led_trigger_dt_match);
+static int32_t msm_led_trigger_probe(struct platform_device *pdev);
 
 static struct platform_driver msm_led_trigger_driver = {
+//	.probe = msm_led_trigger_probe,
 	.driver = {
-		.name = FLASH_NAME,
+		.name = "qcom,camera-led-flash-namek",
 		.owner = THIS_MODULE,
 		.of_match_table = msm_led_trigger_dt_match,
 	},
@@ -314,16 +316,26 @@ static int32_t msm_led_trigger_probe(struct platform_device *pdev)
 
 	rc = msm_led_flash_create_v4lsubdev(pdev, &fctrl);
 	if (!rc)
-		msm_led_torch_create_classdev(pdev, &fctrl, 0);
+		msm_led_torch_create_classdev(pdev, &fctrl, 1);
 
 	return rc;
 }
 
 static int __init msm_led_trigger_add_driver(void)
 {
+	//int rc;
 	CDBG("called\n");
 	return platform_driver_probe(&msm_led_trigger_driver,
 		msm_led_trigger_probe);
+		
+	 //rc =platform_driver_register(&msm_led_trigger_driver);	
+	 //printk("msm_led_trigger_add_driver rc===========%d\n", rc);
+	 //return 0;
+}
+
+static void __exit msm_led_trigger_exit(void)
+{
+	platform_driver_unregister(&msm_led_trigger_driver);
 }
 
 static struct msm_flash_fn_t msm_led_trigger_func_tbl = {
@@ -336,5 +348,6 @@ static struct msm_led_flash_ctrl_t fctrl = {
 };
 
 module_init(msm_led_trigger_add_driver);
+module_exit(msm_led_trigger_exit);
 MODULE_DESCRIPTION("LED TRIGGER FLASH");
 MODULE_LICENSE("GPL v2");
