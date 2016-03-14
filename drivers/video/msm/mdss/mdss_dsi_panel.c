@@ -10,6 +10,9 @@
  * GNU General Public License for more details.
  */
 
+/* #define DEBUG 1 */
+#define pr_fmt(fmt)	KBUILD_MODNAME ": " fmt
+
 #include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/of.h>
