@@ -220,7 +220,6 @@
 #define DEVICE_NAME "ltr559ALSPS"
 
 #define ACT_INTERRUPT 1
-#define DOUBLE_TAP_DEFAULT  500
 
 //#define PS_THRESHOLD_MAX 0xFFF
 //#define PS_THRESHOLD_MIN 0x0
@@ -325,9 +324,6 @@ struct ltr559_data {
 	uint16_t ps_highthresh;
 	uint16_t default_ps_lowthresh;
 	uint16_t default_ps_highthresh;
-	uint16_t dynamic_ps_lowthresh;
-	uint16_t dynamic_ps_highthresh;
-	uint16_t ps_offset;
 	/* Flag to suspend PS on suspend or not */
 	uint8_t disable_ps_on_suspend;
 
@@ -410,7 +406,35 @@ uint8_t ps_movavg_data_counter;
 uint16_t ps_movct_avg;
 /*uint16_t ps_thresh_hi, ps_thresh_lo;*/
 
-#if 0
+/*added by yong.bo on 2015/07/28 for double tap do not wake up when phone in pocket*/
+static uint16_t read_ps_adc_value(struct ltr559_data *ltr559);
+static int ltr559_enable_ps_sensor(struct i2c_client *client, int val);
+unsigned int  ltr559_get_psensor_enable(void)
+{
+	struct ltr559_data *data = i2c_get_clientdata(sensor_info->i2c_client);
+	return data->enable_ps_sensor;
+}
+
+void ltr559_set_ps_sensor(int val)
+{
+	ltr559_enable_ps_sensor(sensor_info->i2c_client,val);
+}
+
+bool ltr559_psensor_get_shade(void)
+{
+	uint16_t adc_value;
+	bool psensor_flag = 1;
+	struct ltr559_data *ltr559 = sensor_info;
+	adc_value = read_ps_adc_value(ltr559);
+	if(adc_value > 500)
+	{
+		psensor_flag =0;
+	}
+	return psensor_flag;
+}
+
+/* end */
+
 static int ltr559_regulator_configure(struct ltr559_data *data, bool on)
 {
 	int rc;
@@ -582,7 +606,7 @@ static void ltr559_platform_hw_exit(void)
 
 	ltr559_regulator_configure(data, false);
 }
-#endif
+
 
 
 /* I2C Read */
@@ -1178,7 +1202,7 @@ static uint16_t read_ps_adc_value(struct ltr559_data *ltr559)
 		return ret;
 	}
 
-	ps_val = (uint16_t)buffer[0] | (((uint16_t)buffer[1] & 0x7)<< 8);
+	ps_val = (uint16_t)buffer[0] | ((uint16_t)buffer[1] << 8);
 		dev_dbg(&ltr559->i2c_client->dev,
 			"%s | ps value = 0x%04X\n", __func__,
 			ps_val);
@@ -1326,7 +1350,6 @@ static int8_t ps_mode_setup(uint8_t psMode_set_reset,
 				struct ltr559_data *ltr559)
 {
 	int8_t ret = 0;
-	struct timespec ts;
   
 	ret = _ltr559_set_bit(ltr559->i2c_client, psMode_set_reset,
 					ltr559_PS_CONTR, PS_MODE_ACTIVE);
@@ -1337,11 +1360,8 @@ static int8_t ps_mode_setup(uint8_t psMode_set_reset,
 	}
 
 	/* default state is far-away */
-	input_report_abs(ltr559->ps_input_dev, ABS_DISTANCE, FAR_VAL);
-	get_monotonic_boottime(&ts);
-	input_event(ltr559->ps_input_dev, EV_SYN, SYN_TIME_SEC, ts.tv_sec);
-	input_event(ltr559->ps_input_dev, EV_SYN, SYN_TIME_NSEC, ts.tv_nsec);
-	input_sync(ltr559->ps_input_dev);
+//	input_report_abs(ltr559->ps_input_dev, ABS_DISTANCE, FAR_VAL);
+//	input_sync(ltr559->ps_input_dev);
 
 	return ret;
 }
@@ -2338,7 +2358,7 @@ static int8_t ps_range_readback(uint16_t *lt, uint16_t *ht,
 	return ret;
 }
 
-#if 0
+
 static uint16_t discardMinMax_findCTMov_Avg(uint16_t *ps_val)
 {
 #define MAX_NUM_PS_DATA1		PS_MAX_MOV_AVG_KEPT_DATA_CTR
@@ -2441,7 +2461,7 @@ static uint16_t findCT_Avg(uint16_t *ps_val)
 
 	return temp;
 }
-#endif
+
 
 /* take note ------------------------------------------
  This function should be called in the function which is called
@@ -2476,7 +2496,7 @@ static void setThrDuringCall(void)
 			"%s: PS Enable Fail...\n", __func__);
 	}
 }
-#if 0 //raw version
+
 /* Report PS input event */
 static void report_ps_input_event(struct ltr559_data *ltr559)
 {
@@ -2543,7 +2563,7 @@ static void report_ps_input_event(struct ltr559_data *ltr559)
 				input_event(ltr559->ps_input_dev, EV_SYN, SYN_TIME_SEC, ts.tv_sec);
 				input_event(ltr559->ps_input_dev, EV_SYN, SYN_TIME_NSEC, ts.tv_nsec);
 				input_sync(ltr559->ps_input_dev);
-				rc = set_ps_range(ltr559->ps_lowthresh, PS_MAX_MEASURE_VAL, LO_N_HI_LIMIT, ltr559);
+				rc = set_ps_range(ltr559->default_ps_lowthresh, PS_MAX_MEASURE_VAL, LO_N_HI_LIMIT, ltr559);
 			}
 
 			if (adc_value < ntf_final) {
@@ -2554,7 +2574,7 @@ static void report_ps_input_event(struct ltr559_data *ltr559)
 				input_event(ltr559->ps_input_dev, EV_SYN, SYN_TIME_SEC, ts.tv_sec);
 				input_event(ltr559->ps_input_dev, EV_SYN, SYN_TIME_NSEC, ts.tv_nsec);
 				input_sync(ltr559->ps_input_dev);
-				rc = set_ps_range(PS_MIN_MEASURE_VAL, ltr559->ps_highthresh, LO_N_HI_LIMIT, ltr559);
+				rc = set_ps_range(PS_MIN_MEASURE_VAL, ltr559->default_ps_highthresh, LO_N_HI_LIMIT, ltr559);
 			}
 
 		}
@@ -2587,65 +2607,6 @@ static void report_ps_input_event(struct ltr559_data *ltr559)
 	}
 
 }
-#else  //new version
-static void report_ps_input_event(struct ltr559_data *ltr559) {
-	int8_t ret;
-	uint16_t adc_value;
-	uint16_t lowthresh_tmp;
-	uint16_t highthresh_tmp;
-	uint16_t reference;//highthresh value
-	struct timespec ts;
-
-	adc_value = read_ps_adc_value(ltr559);
-
-	//dynamic calibrate
-	if ((!ltr559->ps_highthresh) || (!ltr559->ps_lowthresh)) {
-		if (adc_value < ltr559->ps_offset) {
-			ltr559->ps_offset = adc_value;
-			dev_info(&ltr559->i2c_client->dev, "dynamic setting new offset:%d\n", adc_value);
-		}
-
-		lowthresh_tmp = ltr559->default_ps_lowthresh + ltr559->ps_offset;
-		highthresh_tmp = ltr559->default_ps_highthresh + ltr559->ps_offset;
-		reference = ltr559->dynamic_ps_highthresh;
-
-		//update thresh
-		ltr559->dynamic_ps_highthresh = highthresh_tmp;
-		ltr559->dynamic_ps_lowthresh = lowthresh_tmp;
-
-	} else {
-		//static calibrate
-		reference = ltr559->ps_highthresh;
-		lowthresh_tmp = ltr559->ps_lowthresh;
-		highthresh_tmp = ltr559->ps_highthresh;
-	}
-
-	if (adc_value > reference) {
-		input_report_abs(ltr559->ps_input_dev,
-			ABS_DISTANCE, NEAR_VAL);
-		get_monotonic_boottime(&ts);
-		input_event(ltr559->ps_input_dev, EV_SYN, SYN_TIME_SEC, ts.tv_sec);
-		input_event(ltr559->ps_input_dev, EV_SYN, SYN_TIME_NSEC, ts.tv_nsec);
-		input_sync(ltr559->ps_input_dev);
-		ret = set_ps_range(lowthresh_tmp, PS_MAX_MEASURE_VAL, LO_N_HI_LIMIT, ltr559);
-	} else {
-		input_report_abs(ltr559->ps_input_dev,
-			ABS_DISTANCE, FAR_VAL);
-		get_monotonic_boottime(&ts);
-		input_event(ltr559->ps_input_dev, EV_SYN, SYN_TIME_SEC, ts.tv_sec);
-		input_event(ltr559->ps_input_dev, EV_SYN, SYN_TIME_NSEC, ts.tv_nsec);
-		input_sync(ltr559->ps_input_dev);
-		ret = set_ps_range(PS_MIN_MEASURE_VAL, highthresh_tmp, LO_N_HI_LIMIT, ltr559);
-	}
-
-	if (ret < 0) {
-		dev_err(&ltr559->i2c_client->dev,
-				"%s : PS Thresholds Write Fail...\n", __func__);
-	}
-
-}
-#endif
-
 
 /* Report ALS input event */
 static void report_als_input_event(struct ltr559_data *ltr559)
@@ -2674,7 +2635,6 @@ static void ltr559_schedwork(struct work_struct *work)
 	struct ltr559_data *ltr559 = sensor_info;
 	uint8_t buffer[2];
 	
-	pm_stay_awake(&ltr559->i2c_client->dev);
 	buffer[0] = ltr559_ALS_PS_STATUS;
 	ret = I2C_Read(buffer, 1);
 	if (ret < 0) {
@@ -2716,6 +2676,7 @@ static irqreturn_t ltr559_irq_handler(int irq, void *data)
 
 	/* disable an irq without waiting */
 	disable_irq_nosync(ltr559->irq);
+	pm_stay_awake(&ltr559->i2c_client->dev);
 	//schedule_work(&irq_workqueue);
 	queue_work(ltr559->workqueue, &irq_workqueue);
 
@@ -2745,7 +2706,7 @@ static int ltr559_gpio_irq(struct ltr559_data *ltr559)
 	/* Configure an active low trigger interrupt for the device */
 	/*rc = request_irq(ltr559->irq, ltr559_irq_handler,
 				IRQF_TRIGGER_FALLING, DEVICE_NAME, ltr559);*/
-	rc = request_irq(ltr559->irq, ltr559_irq_handler, IRQF_TRIGGER_LOW,
+	rc = request_irq(ltr559->irq, ltr559_irq_handler, IRQF_TRIGGER_LOW | IRQF_NO_THREAD,
 				DEVICE_NAME, ltr559);
 	if (rc < 0) {
 		dev_err(&ltr559->i2c_client->dev,
@@ -3096,10 +3057,8 @@ static uint16_t set_ps_offset(struct ltr559_data *ltr559, uint8_t *buf)
 static int ltr559_cdev_calibrate(struct sensors_classdev *sensors_cdev,
 		int axis, int apply_now)
 {
-	uint8_t reg_buf[3] = {0};
+	uint8_t reg_buf[4] = {0};
 	uint16_t value;
-	uint16_t offset;
-
 	struct ltr559_data *ltr559 = container_of(sensors_cdev, struct ltr559_data,
 			ps_cdev);
 
@@ -3113,28 +3072,22 @@ static int ltr559_cdev_calibrate(struct sensors_classdev *sensors_cdev,
 	}
 
 	set_ps_offset(ltr559, reg_buf);
-	udelay(200);
 	value = read_ps_adc_value(ltr559);
 
-	if (value < 1024)
-		offset = value;
-	else 
-		offset = 1023;
-	
-	ltr559->ps_offset = offset;
-//	ltr559->ps_lowthresh = PS_MAX_MEASURE_VAL * ltr559->default_ps_lowthresh / (PS_MAX_MEASURE_VAL - offset) + offset;
-//	ltr559->ps_highthresh = PS_MAX_MEASURE_VAL * ltr559->default_ps_highthresh / (PS_MAX_MEASURE_VAL - offset) + offset;
-	ltr559->ps_lowthresh =  ltr559->default_ps_lowthresh + offset;
-	ltr559->ps_highthresh = ltr559->default_ps_highthresh + offset;
-	dev_info(&ltr559->i2c_client->dev, "static calibrate noise:%d,highthresh:%d,lowthresh:%d,offset:%d\n",
-		value, ltr559->ps_highthresh, ltr559->ps_lowthresh, offset);
-	reg_buf[1] = (offset >> 8) & 0x3;
-	reg_buf[2] = offset & 0xF;
+	if (value < 50)
+		reg_buf[2] = 10;
+	else if (value < 100)
+		reg_buf[2] = 50;
+	else if (value < 200)
+		reg_buf[2] = 100;
+	else if (value < 400)
+		reg_buf[2] = 200;
+	else
+		reg_buf[2] = 255;
 
-//	set_ps_offset(ltr559, reg_buf);
-	set_ps_range(ltr559->ps_lowthresh, ltr559->ps_highthresh, LO_N_HI_LIMIT, ltr559);
-	snprintf(sensors_cdev->params, 64, "%d,%d,%d", ltr559->ps_highthresh,
-		ltr559->ps_lowthresh, offset);
+	set_ps_offset(ltr559, reg_buf);
+	snprintf(sensors_cdev->params, 64, "%d,%d,%d", 0, 0, reg_buf[2]);
+
 	return 0;
 }
 
@@ -3142,7 +3095,6 @@ static int ltr559_cdev_write_cal_params(struct sensors_classdev
 		*sensors_cdev, struct cal_result_t *cal_result)
 {
 	uint8_t reg_buf[3] = {0};
-
 	struct ltr559_data *ltr559 = container_of(sensors_cdev, struct ltr559_data,
 			ps_cdev);
 
@@ -3155,15 +3107,10 @@ static int ltr559_cdev_write_cal_params(struct sensors_classdev
 		}
 	}
 
-	ltr559->ps_highthresh = cal_result->offset[0];
-	ltr559->ps_lowthresh = cal_result->offset[1];
-//	reg_buf[1] = (cal_result->offset[2] >> 8) && 0x3;
-//	reg_buf[2] = cal_result->offset[2] & 0xF;
-	ltr559->ps_offset = cal_result->offset[2];
+	reg_buf[2] = (uint8_t)cal_result->offset[2];
 	set_ps_offset(ltr559, reg_buf);
-	set_ps_range(ltr559->ps_lowthresh, ltr559->ps_highthresh, LO_N_HI_LIMIT, ltr559);
-	snprintf(sensors_cdev->params, 64, "%d,%d,%d", ltr559->ps_highthresh, 
-		ltr559->ps_lowthresh, cal_result->offset[2]);
+	snprintf(sensors_cdev->params, 64, "%d,%d,%d", 0, 0, reg_buf[2]);
+
 	return 0;
 }
 
@@ -5579,49 +5526,6 @@ static ssize_t disppsthrerange_show(struct device *dev,
 
 static DEVICE_ATTR(disppsthrerange, 0444, disppsthrerange_show, NULL);
 
-/*just for double_tap
-* add by zhou at 2015.11.19
-*/
-static ssize_t ps4shade_show(struct device *dev,
-	struct device_attribute *attr, char *buf){
-	struct ltr559_data *ltr559 = sensor_info;
-	int ret;
-	uint16_t value;
-
-	mutex_lock(&ltr559->enable_lock);
-	if (ltr559->enable_ps_sensor == 0) {
-		ret = _ltr559_set_bit(ltr559->i2c_client, 1, ltr559_PS_CONTR, PS_MODE_ACTIVE);
-		if (ret < 0) {
-			dev_err(&ltr559->i2c_client->dev,
-				"%s PS mode setup fail...\n", __func__);
-			mutex_unlock(&ltr559->enable_lock);
-			return ret;
-		}
-		msleep(25);
-	}
-
-	value = read_ps_adc_value(ltr559);
-	if (value > DOUBLE_TAP_DEFAULT)
-		value = 0;//near
-	else
-		value = 1;//far
-
-	if (ltr559->enable_ps_sensor == 0) {
-		ret = _ltr559_set_bit(ltr559->i2c_client, 0, ltr559_PS_CONTR, PS_MODE_ACTIVE);
-		if (ret < 0) {
-			dev_err(&ltr559->i2c_client->dev,
-				"%s PS mode setup fail...\n", __func__);
-			mutex_unlock(&ltr559->enable_lock);
-			return ret;
-		}
-	}
-	mutex_unlock(&ltr559->enable_lock);
-	ret = sprintf(buf, "%d\n", value);
-	return ret;
-}
-
-static DEVICE_ATTR(ps4shade, 0444, ps4shade_show, NULL);
-
 
 static void sysfs_register_device(struct i2c_client *client)
 {
@@ -5674,7 +5578,6 @@ static void sysfs_register_device(struct i2c_client *client)
 	rc += device_create_file(&client->dev, &dev_attr_setpslothrerange);
 	rc += device_create_file(&client->dev, &dev_attr_setpshithrerange);
 	rc += device_create_file(&client->dev, &dev_attr_disppsthrerange);
-	rc += device_create_file(&client->dev, &dev_attr_ps4shade);
 
 	if (rc)
 		dev_err(&client->dev,
@@ -5793,7 +5696,7 @@ static int _check_part_id(struct ltr559_data *ltr559)
 
 	return 0;
 }
-#if 0
+
 static int ltr559_init_device(struct ltr559_data *ltr559)
 {
 	int ret = 0;
@@ -5882,7 +5785,7 @@ err_out1:
 
 	return ret;
 }
-#endif
+
 static int ltr559_setup(struct ltr559_data *ltr559)
 {
 	int ret = 0;
@@ -5997,7 +5900,7 @@ static int ltr559_enable_als_sensor(struct i2c_client *client, int val)
 {
 	int rc;
 	struct ltr559_data *data = i2c_get_clientdata(client);
-	//struct ltr559_platform_data *pdata = data->platform_data;
+	struct ltr559_platform_data *pdata = data->platform_data;
 
 	uint8_t buffer[1];
 
@@ -6011,7 +5914,6 @@ static int ltr559_enable_als_sensor(struct i2c_client *client, int val)
     mutex_lock(&data->enable_lock);
 
 	if (val == 1) {
-#if 0
 		/* turn on light  sensor */
 		if ((data->enable_als_sensor == 0) &&
 			(data->enable_ps_sensor == 0)) {
@@ -6030,7 +5932,7 @@ static int ltr559_enable_als_sensor(struct i2c_client *client, int val)
 				return rc;
 			}
 		}
-#endif
+
 		if (data->enable_als_sensor == 0) {
 			rc = als_mode_setup((uint8_t)val, data);
 			if (rc) {
@@ -6038,7 +5940,6 @@ static int ltr559_enable_als_sensor(struct i2c_client *client, int val)
                 mutex_unlock(&data->enable_lock);
 				return rc;
 			}
-			msleep(20);
 			buffer[0] = ltr559_ALS_PS_STATUS;
 			I2C_Read(buffer, 1);
 			data->enable_als_sensor = 1;
@@ -6052,7 +5953,7 @@ static int ltr559_enable_als_sensor(struct i2c_client *client, int val)
 		}
 		data->enable_als_sensor = 0;
 	}
-#if 0
+
 	/* Vote off  regulators if both light and prox sensor are off */
 	if ((data->enable_als_sensor == 0) &&
 		(data->enable_ps_sensor == 0) &&
@@ -6061,7 +5962,6 @@ static int ltr559_enable_als_sensor(struct i2c_client *client, int val)
 		//	disable_irq(data->irq);
 			pdata->power_on(false);
 		}
-#endif
     mutex_unlock(&data->enable_lock);
 
 	return 0;
@@ -6071,10 +5971,9 @@ static int ltr559_enable_ps_sensor(struct i2c_client *client, int val)
 {
 	int rc;
 	struct ltr559_data *data = i2c_get_clientdata(client);
-	//struct ltr559_platform_data *pdata = data->platform_data;
+	struct ltr559_platform_data *pdata = data->platform_data;
 
 	uint8_t buffer[1];
-	uint16_t value;
 
 	pr_debug("%s: val=%d\n", __func__, val);
 
@@ -6085,7 +5984,6 @@ static int ltr559_enable_ps_sensor(struct i2c_client *client, int val)
 
     mutex_lock(&data->enable_lock);
 	if (val == 1) {
-#if 0
 		/* turn on p sensor */
 		if ((data->enable_als_sensor == 0) &&
 			(data->enable_ps_sensor == 0)) {
@@ -6104,7 +6002,7 @@ static int ltr559_enable_ps_sensor(struct i2c_client *client, int val)
 				return rc;
 			}
 		}
-#endif
+
 		if (data->enable_ps_sensor == 0) {
             irq_set_irq_wake(data->irq, 1);
 			rc = ps_mode_setup((uint8_t)val, data);
@@ -6113,26 +6011,10 @@ static int ltr559_enable_ps_sensor(struct i2c_client *client, int val)
                 mutex_unlock(&data->enable_lock);
 				return rc;
 			}
-			msleep(20);
 			buffer[0] = ltr559_ALS_PS_STATUS;
 			I2C_Read(buffer, 1);
 			data->enable_ps_sensor = 1;
-		}
-
-		/*if staic calibrate not be enable, we will enable dynamic calibrate */
-		if ((!data->ps_highthresh) || (!data->ps_lowthresh)) {
-				value = read_ps_adc_value(data);
-				if (value < 1024)
-					data->ps_offset = value;
-				else
-					data->ps_offset = 1023;
-
-				data->dynamic_ps_highthresh = data->default_ps_highthresh + data->ps_offset;
-				data->dynamic_ps_lowthresh = data->default_ps_lowthresh + data->ps_offset;
-				set_ps_range(data->dynamic_ps_lowthresh, data->dynamic_ps_highthresh, LO_N_HI_LIMIT, data);
-				dev_info(&data->i2c_client->dev, "noise:%d,highthresh:%d,lowthresh:%d,offset:%d\n",
-					value, data->dynamic_ps_highthresh, data->dynamic_ps_lowthresh, data->ps_offset);
-		}
+		}	
 	} else {
         irq_set_irq_wake(data->irq, 0);
 		rc = ps_mode_setup((uint8_t)val, data);
@@ -6143,7 +6025,7 @@ static int ltr559_enable_ps_sensor(struct i2c_client *client, int val)
 		}
 		data->enable_ps_sensor = 0;
 	}
-#if 0
+
 	/* Vote off  regulators if both light and prox sensor are off */
 	if ((data->enable_als_sensor == 0) &&
 		(data->enable_ps_sensor == 0) &&
@@ -6152,7 +6034,6 @@ static int ltr559_enable_ps_sensor(struct i2c_client *client, int val)
 	//	disable_irq(data->irq);
 		pdata->power_on(false);
 		}
-#endif
     mutex_unlock(&data->enable_lock);
 
 	return 0;
@@ -6280,9 +6161,9 @@ static int ltr559_parse_dt(struct device *dev,
 	int rc;
 
 	/* set functions of platform data */
-//	ltr_pdata->init = ltr559_platform_hw_init;
-//	ltr_pdata->exit = ltr559_platform_hw_exit;
-//	ltr_pdata->power_on = ltr559_platform_hw_power_on;
+	ltr_pdata->init = ltr559_platform_hw_init;
+	ltr_pdata->exit = ltr559_platform_hw_exit;
+	ltr_pdata->power_on = ltr559_platform_hw_power_on;
 
 	rc = of_get_named_gpio_flags(dev->of_node,
 				"liteon,intr", 0, NULL);
@@ -6366,8 +6247,6 @@ static int ltr559_probe(struct i2c_client *client,
 	/*ltr559->adc_levels = platdata->pfd_levels;*/
 	ltr559->default_ps_lowthresh = platdata->pfd_ps_lowthresh;
 	ltr559->default_ps_highthresh = platdata->pfd_ps_highthresh;
-//	ltr559->ps_lowthresh = platdata->pfd_ps_lowthresh;
-//	ltr559->ps_highthresh = platdata->pfd_ps_highthresh;
 	ltr559->enable_als_sensor = 0;
 	ltr559->enable_ps_sensor = 0;
 
